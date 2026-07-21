@@ -26,6 +26,7 @@ import {
   EventId,
   type OrchestrationCommand,
   type GitActionProgressEvent,
+  GitCommandError,
   type GitManagerServiceError,
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
@@ -91,6 +92,7 @@ import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
+import * as WorkspaceVcs from "./vcs/WorkspaceVcs.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
@@ -324,6 +326,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.gitResolvePullRequest, AuthOrchestrationOperateScope],
   [WS_METHODS.gitPreparePullRequestThread, AuthOrchestrationOperateScope],
   [WS_METHODS.vcsListRefs, AuthOrchestrationReadScope],
+  [WS_METHODS.vcsListRepositories, AuthOrchestrationReadScope],
   [WS_METHODS.vcsCreateWorktree, AuthOrchestrationOperateScope],
   [WS_METHODS.vcsRemoveWorktree, AuthOrchestrationOperateScope],
   [WS_METHODS.vcsCreateRef, AuthOrchestrationOperateScope],
@@ -410,6 +413,7 @@ const makeWsRpcLayer = (
       const keybindings = yield* Keybindings.Keybindings;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
+      const workspaceVcs = yield* WorkspaceVcs.WorkspaceVcs;
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
@@ -993,35 +997,76 @@ const makeWsRpcLayer = (
             }
 
             if (bootstrap?.prepareWorktree) {
-              let worktreeBaseRef = bootstrap.prepareWorktree.baseBranch;
-              if (bootstrap.prepareWorktree.startFromOrigin) {
-                yield* gitWorkflow.fetchRemote({
-                  cwd: bootstrap.prepareWorktree.projectCwd,
-                  remoteName: "origin",
+              const prepareWorktree = bootstrap.prepareWorktree;
+              const workspace = yield* workspaceVcs.listRepositories({
+                cwd: prepareWorktree.projectCwd,
+              });
+              if (workspace.kind === "workspace") {
+                // Multi-repo workspace: mirror the workspace root with one
+                // worktree per contained repository, all on the same branch.
+                const workspaceBranch = prepareWorktree.branch;
+                if (!workspaceBranch) {
+                  return yield* new GitCommandError({
+                    operation: "ws.dispatchBootstrapTurnStart",
+                    command: "worktree-workspace-create",
+                    cwd: prepareWorktree.projectCwd,
+                    detail:
+                      "A branch name is required to prepare a worktree workspace for a multi-repo project.",
+                  });
+                }
+                const createdWorkspace = yield* workspaceVcs.createWorktreeWorkspace({
+                  projectCwd: prepareWorktree.projectCwd,
+                  branch: workspaceBranch,
                 });
-                const resolvedRemoteBase = yield* gitWorkflow.resolveRemoteTrackingCommit({
-                  cwd: bootstrap.prepareWorktree.projectCwd,
-                  refName: bootstrap.prepareWorktree.baseBranch,
-                  fallbackRemoteName: "origin",
+                targetWorktreePath = createdWorkspace.workspacePath;
+                yield* orchestrationEngine.dispatch({
+                  type: "thread.meta.update",
+                  commandId: yield* serverCommandId("bootstrap-thread-meta-update"),
+                  threadId: command.threadId,
+                  branch: createdWorkspace.branch,
+                  worktreePath: targetWorktreePath,
                 });
-                worktreeBaseRef = resolvedRemoteBase.commitSha;
+                yield* refreshGitStatus(targetWorktreePath);
+              } else {
+                const baseBranch = prepareWorktree.baseBranch;
+                if (!baseBranch) {
+                  return yield* new GitCommandError({
+                    operation: "ws.dispatchBootstrapTurnStart",
+                    command: "worktree-create",
+                    cwd: prepareWorktree.projectCwd,
+                    detail: "A base branch is required to prepare a worktree.",
+                  });
+                }
+                let worktreeBaseRef = baseBranch;
+                if (prepareWorktree.startFromOrigin) {
+                  yield* gitWorkflow.fetchRemote({
+                    cwd: prepareWorktree.projectCwd,
+                    remoteName: "origin",
+                  });
+                  const resolvedRemoteBase = yield* gitWorkflow.resolveRemoteTrackingCommit({
+                    cwd: prepareWorktree.projectCwd,
+                    refName: baseBranch,
+                    fallbackRemoteName: "origin",
+                  });
+                  worktreeBaseRef = resolvedRemoteBase.commitSha;
+                }
+                const worktree = yield* gitWorkflow.createWorktree({
+                  cwd: prepareWorktree.projectCwd,
+                  refName: worktreeBaseRef,
+                  newRefName: prepareWorktree.branch,
+                  baseRefName: baseBranch,
+                  path: null,
+                });
+                targetWorktreePath = worktree.worktree.path;
+                yield* orchestrationEngine.dispatch({
+                  type: "thread.meta.update",
+                  commandId: yield* serverCommandId("bootstrap-thread-meta-update"),
+                  threadId: command.threadId,
+                  branch: worktree.worktree.refName,
+                  worktreePath: targetWorktreePath,
+                });
+                yield* refreshGitStatus(targetWorktreePath);
               }
-              const worktree = yield* gitWorkflow.createWorktree({
-                cwd: bootstrap.prepareWorktree.projectCwd,
-                refName: worktreeBaseRef,
-                newRefName: bootstrap.prepareWorktree.branch,
-                baseRefName: bootstrap.prepareWorktree.baseBranch,
-                path: null,
-              });
-              targetWorktreePath = worktree.worktree.path;
-              yield* orchestrationEngine.dispatch({
-                type: "thread.meta.update",
-                commandId: yield* serverCommandId("bootstrap-thread-meta-update"),
-                threadId: command.threadId,
-                branch: worktree.worktree.refName,
-                worktreePath: targetWorktreePath,
-              });
-              yield* refreshGitStatus(targetWorktreePath);
             }
 
             yield* runSetupProgram();
@@ -1266,7 +1311,9 @@ const makeWsRpcLayer = (
                 input.requestCompletionMarker === true
                   ? Stream.concat(
                       Stream.fromEffect(
-                        Queue.offer(liveBuffer, { kind: "synchronized" as const }).pipe(
+                        Queue.offer(liveBuffer, {
+                          kind: "synchronized" as const,
+                        }).pipe(
                           Effect.andThen(Queue.takeAll(liveBuffer)),
                           Effect.flatMap(coalesceShellLiveInputs),
                         ),
@@ -1405,7 +1452,9 @@ const makeWsRpcLayer = (
                   input.requestCompletionMarker === true
                     ? Stream.concat(
                         Stream.fromEffect(
-                          Queue.offer(liveBuffer, { kind: "synchronized" as const }),
+                          Queue.offer(liveBuffer, {
+                            kind: "synchronized" as const,
+                          }),
                         ).pipe(Stream.drain),
                         bufferedLiveStream,
                       )
@@ -1436,7 +1485,9 @@ const makeWsRpcLayer = (
                 input.requestCompletionMarker === true
                   ? Stream.concat(
                       Stream.fromEffect(
-                        Queue.offer(liveBuffer, { kind: "synchronized" as const }),
+                        Queue.offer(liveBuffer, {
+                          kind: "synchronized" as const,
+                        }),
                       ).pipe(Stream.drain),
                       bufferedLiveStream,
                     )
@@ -1809,6 +1860,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.vcsListRefs, gitWorkflow.listRefs(input), {
             "rpc.aggregate": "vcs",
           }),
+        [WS_METHODS.vcsListRepositories]: (input) =>
+          observeRpcEffect(WS_METHODS.vcsListRepositories, workspaceVcs.listRepositories(input), {
+            "rpc.aggregate": "vcs",
+          }),
         [WS_METHODS.vcsCreateWorktree]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsCreateWorktree,
@@ -1818,7 +1873,17 @@ const makeWsRpcLayer = (
         [WS_METHODS.vcsRemoveWorktree]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsRemoveWorktree,
-            gitWorkflow.removeWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            workspaceVcs
+              .removeWorktreeWorkspaceIfPresent({
+                path: input.path,
+                force: input.force,
+              })
+              .pipe(
+                Effect.flatMap((removedWorkspace) =>
+                  removedWorkspace ? Effect.void : gitWorkflow.removeWorktree(input),
+                ),
+                Effect.tap(() => refreshGitStatus(input.cwd)),
+              ),
             { "rpc.aggregate": "vcs" },
           ),
         [WS_METHODS.vcsCreateRef]: (input) =>

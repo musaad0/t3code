@@ -259,6 +259,23 @@ describe("resolveSendEnvMode", () => {
     expect(resolveSendEnvMode({ requestedEnvMode: "worktree", isGitRepo: true })).toBe("worktree");
     expect(resolveSendEnvMode({ requestedEnvMode: "worktree", isGitRepo: false })).toBe("local");
   });
+
+  it("keeps worktree mode for multi-repo workspaces", () => {
+    expect(
+      resolveSendEnvMode({
+        requestedEnvMode: "worktree",
+        isGitRepo: false,
+        isMultiRepoWorkspace: true,
+      }),
+    ).toBe("worktree");
+    expect(
+      resolveSendEnvMode({
+        requestedEnvMode: "worktree",
+        isGitRepo: false,
+        isMultiRepoWorkspace: false,
+      }),
+    ).toBe("local");
+  });
 });
 
 describe("reconcileMountedTerminalThreadIds", () => {
@@ -504,8 +521,18 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       threadError: null,
     };
 
-    expect(hasServerAcknowledgedLocalDispatch({ ...common, hasPendingApproval: true })).toBe(true);
-    expect(hasServerAcknowledgedLocalDispatch({ ...common, hasPendingUserInput: true })).toBe(true);
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        ...common,
+        hasPendingApproval: true,
+      }),
+    ).toBe(true);
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        ...common,
+        hasPendingUserInput: true,
+      }),
+    ).toBe(true);
     expect(hasServerAcknowledgedLocalDispatch({ ...common, threadError: "failed" })).toBe(true);
   });
 });
