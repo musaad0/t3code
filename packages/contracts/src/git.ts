@@ -104,6 +104,27 @@ export const VcsStatusInput = Schema.Struct({
 });
 export type VcsStatusInput = typeof VcsStatusInput.Type;
 
+export const VcsWorkspaceRepository = Schema.Struct({
+  name: TrimmedNonEmptyStringSchema,
+  root: TrimmedNonEmptyStringSchema,
+  relativePath: Schema.String,
+});
+export type VcsWorkspaceRepository = typeof VcsWorkspaceRepository.Type;
+
+export const VcsWorkspaceKind = Schema.Literals(["repository", "workspace", "none"]);
+export type VcsWorkspaceKind = typeof VcsWorkspaceKind.Type;
+
+export const VcsListRepositoriesInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+});
+export type VcsListRepositoriesInput = typeof VcsListRepositoriesInput.Type;
+
+export const VcsListRepositoriesResult = Schema.Struct({
+  kind: VcsWorkspaceKind,
+  repositories: Schema.Array(VcsWorkspaceRepository),
+});
+export type VcsListRepositoriesResult = typeof VcsListRepositoriesResult.Type;
+
 export const VcsPullInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
 });

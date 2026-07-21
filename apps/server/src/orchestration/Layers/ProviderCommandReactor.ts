@@ -40,6 +40,7 @@ import {
 } from "../Services/ProviderCommandReactor.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
+import { WorkspaceVcs } from "../../vcs/WorkspaceVcs.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
@@ -194,6 +195,7 @@ const make = Effect.gen(function* () {
   const providerRegistry = yield* ProviderRegistry;
   const gitWorkflow = yield* GitWorkflowService;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
+  const workspaceVcs = yield* WorkspaceVcs;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
   const serverCommandId = (tag: string) =>
@@ -678,12 +680,23 @@ const make = Effect.gen(function* () {
       const targetBranch = buildGeneratedWorktreeBranchName(generated.branch);
       if (targetBranch === oldBranch) return;
 
-      const renamed = yield* gitWorkflow.renameBranch({ cwd, oldBranch, newBranch: targetBranch });
+      const renamedWorkspace = yield* workspaceVcs.renameWorktreeWorkspaceBranchIfPresent({
+        path: cwd,
+        oldBranch,
+        newBranch: targetBranch,
+      });
+      const renamedBranch = renamedWorkspace
+        ? targetBranch
+        : (yield* gitWorkflow.renameBranch({
+            cwd,
+            oldBranch,
+            newBranch: targetBranch,
+          })).branch;
       yield* orchestrationEngine.dispatch({
         type: "thread.meta.update",
         commandId: yield* serverCommandId("worktree-branch-rename"),
         threadId: input.threadId,
-        branch: renamed.branch,
+        branch: renamedBranch,
         worktreePath: cwd,
       });
       yield* vcsStatusBroadcaster.refreshStatus(cwd).pipe(Effect.ignoreCause({ log: true }));

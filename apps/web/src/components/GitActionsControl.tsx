@@ -95,6 +95,12 @@ interface GitActionsControlProps {
   gitCwd: string | null;
   activeThreadRef: ScopedThreadRef | null;
   draftId?: DraftId;
+  /**
+   * When false, this control never writes the observed git branch back to the
+   * thread metadata. Used when multiple controls are mounted for a multi-repo
+   * workspace so per-repo branches don't fight over the single thread branch.
+   */
+  syncThreadBranch?: boolean;
 }
 
 interface PendingDefaultBranchAction {
@@ -971,6 +977,7 @@ export default function GitActionsControl({
   gitCwd,
   activeThreadRef,
   draftId,
+  syncThreadBranch = true,
 }: GitActionsControlProps) {
   const updateThreadMetadata = useAtomCommand(
     threadEnvironment.updateMetadata,
@@ -1025,7 +1032,7 @@ export default function GitActionsControl({
 
   const persistThreadBranchSync = useCallback(
     (branch: string | null) => {
-      if (!activeThreadRef) {
+      if (!syncThreadBranch || !activeThreadRef) {
         return;
       }
 
@@ -1060,6 +1067,7 @@ export default function GitActionsControl({
       activeThreadRef,
       draftId,
       setDraftThreadContext,
+      syncThreadBranch,
       updateThreadMetadata,
     ],
   );

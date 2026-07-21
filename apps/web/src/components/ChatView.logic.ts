@@ -189,8 +189,9 @@ export function readFileAsDataUrl(file: File): Promise<string> {
 export function resolveSendEnvMode(input: {
   requestedEnvMode: DraftThreadEnvMode;
   isGitRepo: boolean;
+  isMultiRepoWorkspace?: boolean;
 }): DraftThreadEnvMode {
-  return input.isGitRepo ? input.requestedEnvMode : "local";
+  return input.isGitRepo || input.isMultiRepoWorkspace === true ? input.requestedEnvMode : "local";
 }
 
 export function cloneComposerImageForRetry(
