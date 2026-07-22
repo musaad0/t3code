@@ -59,6 +59,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Clock from "effect/Clock";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
+import * as WorkspaceVcs from "../../vcs/WorkspaceVcs.ts";
 import * as GitWorkflowService from "../../git/GitWorkflowService.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
@@ -354,6 +355,11 @@ describe("ProviderCommandReactor", () => {
         } satisfies Partial<GitWorkflowService.GitWorkflowService["Service"]>),
       ),
       Layer.provideMerge(
+        Layer.mock(WorkspaceVcs.WorkspaceVcs)({
+          renameWorktreeWorkspaceBranchIfPresent: () => Effect.succeed(false),
+        } satisfies Partial<WorkspaceVcs.WorkspaceVcs["Service"]>),
+      ),
+      Layer.provideMerge(
         Layer.succeed(VcsStatusBroadcaster, {
           getStatus: () => Effect.die("getStatus should not be called in this test"),
           refreshLocalStatus: () =>
@@ -616,7 +622,7 @@ describe("ProviderCommandReactor", () => {
         type: "thread.meta.update",
         commandId: CommandId.make("cmd-thread-branch"),
         threadId: ThreadId.make("thread-1"),
-        branch: "t3code/1234abcd",
+        branch: "worktree/1234abcd",
         worktreePath: "/tmp/provider-project-worktree",
       }),
     );
@@ -968,7 +974,10 @@ describe("ProviderCommandReactor", () => {
 
   it("starts a first turn on the requested provider instance even when it differs from the thread model", async () => {
     const harness = await createHarness({
-      threadModelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+      threadModelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5-codex",
+      },
     });
     const now = "2026-01-01T00:00:00.000Z";
 
