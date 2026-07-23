@@ -12,6 +12,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   Columns2Icon,
+  FolderGit2Icon,
   PilcrowIcon,
   Rows3Icon,
   SearchIcon,
@@ -224,11 +225,30 @@ export default function DiffPanel({
     activeThread?.environmentId ?? null,
     serverConfig?.availableEditors ?? [],
   );
-  const gitStatusQuery = useEnvironmentQuery(
+  // A workspace folder can contain multiple child repositories instead of
+  // being a repository itself. Diff queries then target a selected child repo.
+  const [selectedRepositoryRoot, setSelectedRepositoryRoot] = useState<string | null>(null);
+  const workspaceRepositoriesQuery = useEnvironmentQuery(
     activeThread !== null && activeThread !== undefined && activeCwd != null
-      ? vcsEnvironment.status({
+      ? vcsEnvironment.listRepositories({
           environmentId: activeThread.environmentId,
           input: { cwd: activeCwd },
+        })
+      : null,
+  );
+  const workspaceData = workspaceRepositoriesQuery.data;
+  const workspaceRepositories =
+    workspaceData?.kind === "workspace" ? workspaceData.repositories : null;
+  const selectedRepository = workspaceRepositories
+    ? (workspaceRepositories.find((repository) => repository.root === selectedRepositoryRoot) ??
+      workspaceRepositories[0])
+    : undefined;
+  const diffCwd = selectedRepository?.root ?? activeCwd;
+  const gitStatusQuery = useEnvironmentQuery(
+    activeThread !== null && activeThread !== undefined && diffCwd != null
+      ? vcsEnvironment.status({
+          environmentId: activeThread.environmentId,
+          input: { cwd: diffCwd },
         })
       : null,
   );
@@ -323,11 +343,11 @@ export default function DiffPanel({
     { enabled: isGitRepo && selectedTurn !== undefined },
   );
   const primaryBranchDiffPreview = useEnvironmentQuery(
-    selectedTurnId === null && activeThread && activeCwd
+    selectedTurnId === null && activeThread && diffCwd
       ? reviewEnvironment.diffPreview({
           environmentId: activeThread.environmentId,
           input: {
-            cwd: activeCwd,
+            cwd: diffCwd,
             ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
             ignoreWhitespace: diffIgnoreWhitespace,
           },
@@ -338,7 +358,7 @@ export default function DiffPanel({
     selectedTurnId === null &&
     primaryBranchDiffPreview.error?.includes("configured workspace root") === true &&
     serverConfig?.cwd !== undefined &&
-    serverConfig.cwd !== activeCwd;
+    serverConfig.cwd !== diffCwd;
   const fallbackBranchDiffPreview = useEnvironmentQuery(
     shouldRetryBranchDiffAtEnvironmentCwd && activeThread && serverConfig
       ? reviewEnvironment.diffPreview({
@@ -451,7 +471,11 @@ export default function DiffPanel({
     if (!selectedFilePath) return;
     const file = codeViewFiles.find((candidate) => candidate.filePath === selectedFilePath);
     if (!file) return;
-    codeViewRef.current?.scrollTo({ type: "item", id: file.fileKey, align: "start" });
+    codeViewRef.current?.scrollTo({
+      type: "item",
+      id: file.fileKey,
+      align: "start",
+    });
   }, [codeViewFiles, selectedFilePath, selectedFileRevealRequestId]);
 
   const openDiffFile = useCallback(
@@ -459,7 +483,7 @@ export default function DiffPanel({
       openDiffFilePrimaryAction({
         threadRef: routeThreadRef,
         filePath,
-        activeCwd,
+        activeCwd: diffCwd,
         openInEditor: (targetPath) => {
           void (async () => {
             const result = await openInPreferredEditor(targetPath);
@@ -479,7 +503,7 @@ export default function DiffPanel({
         },
       });
     },
-    [activeCwd, openInPreferredEditor, routeThreadRef],
+    [diffCwd, openInPreferredEditor, routeThreadRef],
   );
   const toggleDiffFileCollapsed = useCallback(
     (fileKey: string) => {
@@ -512,6 +536,32 @@ export default function DiffPanel({
   const headerRow = (
     <>
       <div className="flex min-w-0 flex-1 items-center gap-3 [-webkit-app-region:no-drag]">
+        {workspaceRepositories && selectedRepository && (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className="inline-flex h-6 max-w-40 items-center gap-1 rounded-md bg-muted/70 px-2 text-xs font-medium text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={`Choose repository. Current repository: ${selectedRepository.name}`}
+            >
+              <FolderGit2Icon className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate">{selectedRepository.name}</span>
+              <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-60">
+              {workspaceRepositories.map((repository) => (
+                <DropdownMenuItem
+                  key={repository.root}
+                  onClick={() => setSelectedRepositoryRoot(repository.root)}
+                >
+                  <FolderGit2Icon aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate" title={repository.name}>
+                    {repository.name}
+                  </span>
+                  {repository.root === selectedRepository.root && <CheckIcon className="ml-auto" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger
             className="inline-flex h-6 max-w-full items-center gap-1 rounded-md bg-muted/70 px-2 text-xs font-medium text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"

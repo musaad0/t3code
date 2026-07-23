@@ -2935,7 +2935,7 @@ function ChatViewContent(props: ChatViewProps) {
     void addBrowserSurface({ threadRef: activeThreadRef, openPreview });
   }, [activeThreadRef, openPreview]);
   const addDiffSurface = useCallback(() => {
-    if (!activeThreadRef || !isServerThread || !isGitRepo) return;
+    if (!activeThreadRef || !isServerThread || (!isGitRepo && !isMultiRepoWorkspace)) return;
     if (planSidebarOpen) {
       dismissPlanSidebarForCurrentTurn();
     }
@@ -2945,6 +2945,7 @@ function ChatViewContent(props: ChatViewProps) {
     activeThreadRef,
     dismissPlanSidebarForCurrentTurn,
     isGitRepo,
+    isMultiRepoWorkspace,
     isServerThread,
     onDiffPanelOpen,
     planSidebarOpen,
@@ -5597,7 +5598,7 @@ function ChatViewContent(props: ChatViewProps) {
           onAddDiff={addDiffSurface}
           onAddFiles={addFilesSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
-          diffAvailable={isServerThread && isGitRepo}
+          diffAvailable={isServerThread && (isGitRepo || isMultiRepoWorkspace)}
           filesAvailable={activeProject !== null}
         >
           {rightPanelContent}
@@ -5624,7 +5625,7 @@ function ChatViewContent(props: ChatViewProps) {
             onAddDiff={addDiffSurface}
             onAddFiles={addFilesSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
-            diffAvailable={isServerThread && isGitRepo}
+            diffAvailable={isServerThread && (isGitRepo || isMultiRepoWorkspace)}
             filesAvailable={activeProject !== null}
           >
             {rightPanelContent}
